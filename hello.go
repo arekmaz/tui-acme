@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"log"
@@ -166,13 +167,25 @@ func main() {
 					return
 				}
 
-				stat, err := os.Stat(event.Name)
+				path := event.Name
 
-				if err != nil {
+				// Check if the string ends with "~"
+				if strings.HasSuffix(path, "~") {
+					// Remove the last character
+					path = path[:len(path)-1]
+				}
+
+				stat, err := os.Stat(path)
+
+				if errors.Is(err, fs.ErrNotExist) {
 					continue
 				}
 
-				chunks := strings.Split(event.Name, "/")
+				if err != nil {
+					panic("error 1 " + path + err.Error())
+				}
+
+				chunks := strings.Split(path, "/")
 				id := chunks[1]
 
 				byteContent, err := os.ReadFile("fs/" + id + "/content")
@@ -240,7 +253,11 @@ func main() {
 
 				}
 
-				if event.Op != fsnotify.Write && event.Op != fsnotify.Remove {
+				if stat.IsDir() {
+					continue
+				}
+
+				if event.Op != fsnotify.Write && event.Op != fsnotify.Remove && event.Op != fsnotify.Create {
 					continue
 				}
 
