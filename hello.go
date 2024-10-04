@@ -155,52 +155,67 @@ func main() {
 	go func() {
 		for {
 			select {
-			case _, ok := <-watcher.Events:
+			case event, ok := <-watcher.Events:
 				if !ok {
 					return
 				}
-				err = filepath.WalkDir("./fs", func(path string, d fs.DirEntry, err error) error {
+
+				if event.Op != fsnotify.Write && event.Op != fsnotify.Remove {
+					continue
+				}
+
+				chunks := strings.Split(event.Name, "/")
+
+				id := chunks[1]
+
+				byteContent, err := os.ReadFile("fs/" + id + "/content")
+
+				var content string
+
+				if err == nil {
+					content = string(byteContent)
+				}
+
+				var tag string
+
+				byteTag, err := os.ReadFile("fs/" + id + "/tag")
+
+				if err == nil {
+					tag = strings.Trim(string(byteTag), " ")
+				} else {
+					tag = makeDefaultWindowTag(pwd)
+				}
+
+				g.Update(func(g *gocui.Gui) error {
+					v, err := g.View(id)
 					if err != nil {
 						return err
 					}
+					v.Clear()
+					lines := strings.Split(content, "\n")
+					w := 0
+					title := id + " " + tag
 
-					if !d.IsDir() || path == "./fs" {
-						return nil
+					for _, l := range lines {
+						if len(l) > w {
+							w = len(l)
+						}
 					}
 
-					id := strings.Replace(path, "/fs", "", 1)
-					byteContent, err := os.ReadFile(path + "/content")
+					h := len(lines) + 4
 
-					var content string
+					w = max(len(title), w) + 1
 
-					if err == nil {
-						content = string(byteContent)
-					}
-
-					var tag string
-
-					byteTag, err := os.ReadFile(path + "/tag")
-
-					if err == nil {
-						tag = strings.Trim(string(byteTag), " ")
-					} else {
-						tag = makeDefaultWindowTag(pwd)
-					}
-
-					windows = append(windows, NewView(id, pwd, tag, content))
-
-					var managers []gocui.Manager
-
-					for _, v := range windows {
-						managers = append(managers, v)
-					}
-
-					managers = append(managers, fl)
-
-					g.SetManager(managers...)
+					fmt.Fprint(v, title)
+					fmt.Fprint(v, "\n")
+					fmt.Fprint(v, "\n")
+					fmt.Fprint(v, content)
+					fmt.Fprint(v, "\n")
+					fmt.Fprint(v, "w: "+strconv.Itoa(w)+", h: "+strconv.Itoa(h))
 
 					return nil
 				})
+
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					return
@@ -225,7 +240,7 @@ func main() {
 			log.Fatal(err)
 		}
 
-		id := strings.Replace(path, "/fs", "", 1)
+		id := strings.Replace(path, "fs/", "", 1)
 		byteContent, err := os.ReadFile(path + "/content")
 
 		var content string
