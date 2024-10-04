@@ -189,6 +189,29 @@ func readWindowTag(id string) string {
 	return tag
 }
 
+func windowsFromIds(ids []string) []*Window {
+	var windows []*Window
+
+	for _, id := range ids {
+		window := NewWindow(id, pwd, readWindowTag(id), readWindowContent(id))
+		windows = append(windows, window)
+	}
+
+	return windows
+}
+
+func managersFromWindows(windows []*Window) []gocui.Manager {
+	var managers []gocui.Manager
+
+	for _, v := range windows {
+		managers = append(managers, v)
+	}
+
+	managers = append(managers)
+
+	return managers
+}
+
 func main() {
 	pwd, pwdErr := os.Getwd()
 
@@ -196,10 +219,10 @@ func main() {
 		panic(pwdErr.Error())
 	}
 
-	var windows []*Window
 	fl := gocui.ManagerFunc(flowLayout)
 
 	topLvlWatcher, err := fsnotify.NewWatcher()
+	windowWatcher, err := fsnotify.NewWatcher()
 
 	if err != nil {
 		panic(err.Error())
@@ -213,14 +236,18 @@ func main() {
 		panic(err.Error())
 	}
 
-	// Add a path.
+	windowIds, err := readWindowIds()
+
+	if err != nil {
+		panic(err.Error())
+	}
+
 	err = topLvlWatcher.Add("./fs")
 
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Start listening for events.
 	go func() {
 		for {
 			select {
@@ -248,7 +275,11 @@ func main() {
 
 				tag := readWindowTag(id)
 
-				if event.Op == fsnotify.Remove && stat.IsDir() {
+				if !stat.IsDir() {
+					continue
+				}
+
+				if event.Op == fsnotify.Remove {
 					g.Update(func(g *gocui.Gui) error {
 						g.DeleteView(id)
 
@@ -256,10 +287,9 @@ func main() {
 					})
 
 					continue
-
 				}
 
-				if event.Op == fsnotify.Create && stat.IsDir() {
+				if event.Op == fsnotify.Create {
 					g.Update(func(g *gocui.Gui) error {
 						window := NewWindow(id, pwd, tag, content)
 
@@ -271,53 +301,13 @@ func main() {
 							return err
 						}
 
-            window.Draw(v)
+						window.Draw(v)
 
 						return nil
 					})
 
 					continue
-
 				}
-
-				if stat.IsDir() {
-					continue
-				}
-
-				if event.Op != fsnotify.Write && event.Op != fsnotify.Remove && event.Op != fsnotify.Create {
-					continue
-				}
-
-				g.Update(func(g *gocui.Gui) error {
-					v, err := g.View(id)
-					if err != nil {
-						return err
-					}
-					v.Clear()
-					lines := strings.Split(content, "\n")
-					w := 0
-					title := id + " " + tag
-
-					for _, l := range lines {
-						if len(l) > w {
-							w = len(l)
-						}
-					}
-
-					h := len(lines) + 4
-
-					w = max(len(title), w) + 1
-
-					fmt.Fprint(v, title)
-					fmt.Fprint(v, "\n")
-					fmt.Fprint(v, "\n")
-					fmt.Fprint(v, content)
-					fmt.Fprint(v, "\n")
-					fmt.Fprint(v, "w: "+strconv.Itoa(w)+", h: "+strconv.Itoa(h))
-
-					return nil
-				})
-
 			case err, ok := <-topLvlWatcher.Errors:
 				if !ok {
 					return
@@ -327,59 +317,64 @@ func main() {
 		}
 	}()
 
-	err = filepath.WalkDir("./fs", func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
+	go func() {
+		for {
+			select {
+			case event, ok := <-windowWatcher.Events:
+				if !ok {
+					return
+				}
+
+				path := event.Name
+
+				chunks := strings.Split(path, "/")
+				id := chunks[1]
+
+				content := readWindowContent(id)
+
+				tag := readWindowTag(id)
+
+				stat, err := statPath(path)
+
+				if err != nil {
+					panic("error 1 " + path + err.Error())
+				}
+
+				if stat != nil && stat.IsDir() {
+					continue
+				}
+
+				g.Update(func(g *gocui.Gui) error {
+					v, err := g.View(id)
+					if err != nil {
+						return err
+					}
+					v.Clear()
+					window := NewWindow(id, pwd, tag, content)
+
+					window.Draw(v)
+
+					return nil
+				})
+
+			case err, ok := <-windowWatcher.Errors:
+				if !ok {
+					return
+				}
+				log.Println("error:", err)
+			}
 		}
+	}()
 
-		if !d.IsDir() || path == "./fs" {
-			return nil
-		}
-
-		// Add a path.
-		err = topLvlWatcher.Add(path)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		id := strings.Replace(path, "fs/", "", 1)
-		byteContent, err := os.ReadFile(path + "/content")
-
-		var content string
-
-		if err == nil {
-			content = string(byteContent)
-		}
-
-		var tag string
-
-		byteTag, err := os.ReadFile(path + "/tag")
-
-		if err == nil {
-			tag = strings.Trim(string(byteTag), " ")
-		} else {
-			tag = makeDefaultWindowTag(pwd)
-		}
-
-		windows = append(windows, NewWindow(id, pwd, tag, content))
-
-		return nil
-	})
-
-	if err != nil {
-		log.Panicln(err)
+	for _, windowId := range windowIds {
+		windowWatcher.Add("./fs/" + windowId)
 	}
+
 	defer g.Close()
 
-	var managers []gocui.Manager
+	managers := managersFromWindows(windowsFromIds(windowIds))
 
-	for _, v := range windows {
-		managers = append(managers, v)
-	}
-
-	managers = append(managers, fl)
-
-	g.SetManager(managers...)
+	g.SetManager(append(managers, fl)...)
 
 	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
 		log.Panicln(err)
