@@ -139,7 +139,54 @@ func readWindowIds() ([]string, error) {
 	}
 
 	return ids, nil
+}
 
+func statPath(p string) (fs.FileInfo, error) {
+
+	var path string = p
+
+	if strings.HasSuffix(path, "~") {
+		// Remove the last character
+		path = path[:len(path)-1]
+	}
+
+	stat, err := os.Stat(path)
+
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return stat, nil
+}
+
+func readWindowContent(id string) string {
+	byteContent, err := os.ReadFile("fs/" + id + "/content")
+
+	var content string
+
+	if err == nil {
+		content = string(byteContent)
+	}
+
+	return content
+}
+
+func readWindowTag(id string) string {
+	var tag string
+
+	byteTag, err := os.ReadFile("fs/" + id + "/tag")
+
+	if err == nil {
+		tag = strings.Trim(string(byteTag), " ")
+	} else {
+		tag = makeDefaultWindowTag(pwd)
+	}
+
+	return tag
 }
 
 func main() {
@@ -184,15 +231,9 @@ func main() {
 
 				path := event.Name
 
-				// Check if the string ends with "~"
-				if strings.HasSuffix(path, "~") {
-					// Remove the last character
-					path = path[:len(path)-1]
-				}
+				stat, err := statPath(path)
 
-				stat, err := os.Stat(path)
-
-				if errors.Is(err, fs.ErrNotExist) {
+				if stat == nil {
 					continue
 				}
 
@@ -203,23 +244,9 @@ func main() {
 				chunks := strings.Split(path, "/")
 				id := chunks[1]
 
-				byteContent, err := os.ReadFile("fs/" + id + "/content")
+				content := readWindowContent(id)
 
-				var content string
-
-				if err == nil {
-					content = string(byteContent)
-				}
-
-				var tag string
-
-				byteTag, err := os.ReadFile("fs/" + id + "/tag")
-
-				if err == nil {
-					tag = strings.Trim(string(byteTag), " ")
-				} else {
-					tag = makeDefaultWindowTag(pwd)
-				}
+				tag := readWindowTag(id)
 
 				if event.Op == fsnotify.Remove && stat.IsDir() {
 					g.Update(func(g *gocui.Gui) error {
@@ -234,19 +261,9 @@ func main() {
 
 				if event.Op == fsnotify.Create && stat.IsDir() {
 					g.Update(func(g *gocui.Gui) error {
-						lines := strings.Split(content, "\n")
-						w := 0
-						title := id + " " + tag
+						window := NewWindow(id, pwd, tag, content)
 
-						for _, l := range lines {
-							if len(l) > w {
-								w = len(l)
-							}
-						}
-
-						h := len(lines) + 4
-
-						w = max(len(title), w) + 1
+						w, h, _ := window.DisplayData()
 
 						v, err := g.SetView(id, 0, 0, w, h)
 
@@ -254,12 +271,7 @@ func main() {
 							return err
 						}
 
-						fmt.Fprint(v, title)
-						fmt.Fprint(v, "\n")
-						fmt.Fprint(v, "\n")
-						fmt.Fprint(v, content)
-						fmt.Fprint(v, "\n")
-						fmt.Fprint(v, "w: "+strconv.Itoa(w)+", h: "+strconv.Itoa(h))
+            window.Draw(v)
 
 						return nil
 					})
