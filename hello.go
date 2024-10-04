@@ -229,6 +229,7 @@ func main() {
 	}
 
 	defer topLvlWatcher.Close()
+	defer windowWatcher.Close()
 
 	g, err := gocui.NewGui(gocui.OutputNormal)
 
@@ -260,10 +261,6 @@ func main() {
 
 				stat, err := statPath(path)
 
-				if stat == nil {
-					continue
-				}
-
 				if err != nil {
 					panic("error 1 " + path + err.Error())
 				}
@@ -275,13 +272,16 @@ func main() {
 
 				tag := readWindowTag(id)
 
-				if !stat.IsDir() {
+				if stat != nil && !stat.IsDir() {
 					continue
 				}
 
-				if event.Op == fsnotify.Remove {
+				if stat == nil || event.Op == fsnotify.Remove {
+
 					g.Update(func(g *gocui.Gui) error {
-						g.DeleteView(id)
+						if err := g.DeleteView(id); err != nil {
+							return err
+						}
 
 						return nil
 					})
@@ -297,17 +297,17 @@ func main() {
 
 						v, err := g.SetView(id, 0, 0, w, h)
 
-						if err != nil {
-							return err
+						if err != nil && err != gocui.ErrUnknownView {
+							panic(err.Error())
 						}
 
 						window.Draw(v)
-
 						return nil
 					})
 
 					continue
 				}
+
 			case err, ok := <-topLvlWatcher.Errors:
 				if !ok {
 					return
@@ -327,12 +327,12 @@ func main() {
 
 				path := event.Name
 
-				chunks := strings.Split(path, "/")
-				id := chunks[1]
+				// chunks := strings.Split(path, "/")
+				// id := chunks[1]
 
-				content := readWindowContent(id)
-
-				tag := readWindowTag(id)
+				// content := readWindowContent(id)
+				//
+				// tag := readWindowTag(id)
 
 				stat, err := statPath(path)
 
@@ -344,18 +344,18 @@ func main() {
 					continue
 				}
 
-				g.Update(func(g *gocui.Gui) error {
-					v, err := g.View(id)
-					if err != nil {
-						return err
-					}
-					v.Clear()
-					window := NewWindow(id, pwd, tag, content)
-
-					window.Draw(v)
-
-					return nil
-				})
+				// g.Update(func(g *gocui.Gui) error {
+				// 	v, err := g.View(id)
+				// 	if err != nil {
+				// 		return err
+				// 	}
+				// 	v.Clear()
+				// 	window := NewWindow(id, pwd, tag, content)
+				//
+				// 	window.Draw(v)
+				//
+				// 	return nil
+				// })
 
 			case err, ok := <-windowWatcher.Errors:
 				if !ok {
@@ -366,15 +366,23 @@ func main() {
 		}
 	}()
 
-	for _, windowId := range windowIds {
-		windowWatcher.Add("./fs/" + windowId)
+	g.SetManager(fl)
+
+	for _, window := range windowsFromIds(windowIds) {
+		windowWatcher.Add("./fs/" + window.id)
+     w,h,_ := window.DisplayData()
+     v, err := g.SetView(window.id, 0, 0, w, h)
+
+     if err != nil && err != gocui.ErrUnknownView {
+       panic(err.Error())
+     }
+
+     window.Draw(v)
 	}
 
 	defer g.Close()
 
-	managers := managersFromWindows(windowsFromIds(windowIds))
 
-	g.SetManager(append(managers, fl)...)
 
 	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
 		log.Panicln(err)
