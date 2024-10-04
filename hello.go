@@ -151,6 +151,12 @@ func main() {
 
 	g, err := gocui.NewGui(gocui.OutputNormal)
 
+	// Add a path.
+	err = watcher.Add("./fs")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	// Start listening for events.
 	go func() {
 		for {
@@ -160,12 +166,13 @@ func main() {
 					return
 				}
 
-				if event.Op != fsnotify.Write && event.Op != fsnotify.Remove {
+				stat, err := os.Stat(event.Name)
+
+				if err != nil {
 					continue
 				}
 
 				chunks := strings.Split(event.Name, "/")
-
 				id := chunks[1]
 
 				byteContent, err := os.ReadFile("fs/" + id + "/content")
@@ -184,6 +191,57 @@ func main() {
 					tag = strings.Trim(string(byteTag), " ")
 				} else {
 					tag = makeDefaultWindowTag(pwd)
+				}
+
+				if event.Op == fsnotify.Remove && stat.IsDir() {
+					g.Update(func(g *gocui.Gui) error {
+						g.DeleteView(id)
+
+						return nil
+					})
+
+					continue
+
+				}
+
+				if event.Op == fsnotify.Create && stat.IsDir() {
+					g.Update(func(g *gocui.Gui) error {
+						lines := strings.Split(content, "\n")
+						w := 0
+						title := id + " " + tag
+
+						for _, l := range lines {
+							if len(l) > w {
+								w = len(l)
+							}
+						}
+
+						h := len(lines) + 4
+
+						w = max(len(title), w) + 1
+
+						v, err := g.SetView(id, 0, 0, w, h)
+
+						if err != nil {
+							return err
+						}
+
+						fmt.Fprint(v, title)
+						fmt.Fprint(v, "\n")
+						fmt.Fprint(v, "\n")
+						fmt.Fprint(v, content)
+						fmt.Fprint(v, "\n")
+						fmt.Fprint(v, "w: "+strconv.Itoa(w)+", h: "+strconv.Itoa(h))
+
+						return nil
+					})
+
+					continue
+
+				}
+
+				if event.Op != fsnotify.Write && event.Op != fsnotify.Remove {
+					continue
 				}
 
 				g.Update(func(g *gocui.Gui) error {
