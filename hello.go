@@ -23,9 +23,9 @@ type Label struct {
 	body string
 }
 
+var pwd string
+
 func NewLabel(name string, body string) *Label {
-
-
 	return &Label{name: name, body: body}
 }
 
@@ -122,11 +122,10 @@ func safeRun(s string, args ...string) string {
   return string(o)
 }
 
-func makeDefaultWindowTag(pwd string) string {
-  osPwd, _ := os.Getwd()
+func makeDefaultWindowTag(localPwd string) string {
   suff :=  "New Del Look"
 
-  if (pwd == osPwd) {
+  if (pwd == localPwd) {
     return suff
   }
 
@@ -135,6 +134,12 @@ func makeDefaultWindowTag(pwd string) string {
 
 
 func main() {
+  pwd, pwdErr := os.Getwd()
+
+  if pwdErr != nil {
+   panic(pwdErr.Error())
+  }
+
 	g, err := gocui.NewGui(gocui.OutputNormal)
 	if err != nil {
 		log.Panicln(err)
