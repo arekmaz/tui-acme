@@ -140,6 +140,9 @@ func main() {
 		panic(pwdErr.Error())
 	}
 
+	var windows []*View
+	fl := gocui.ManagerFunc(flowLayout)
+
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		log.Fatal(err)
@@ -148,19 +151,81 @@ func main() {
 
 	g, err := gocui.NewGui(gocui.OutputNormal)
 
-	var windows []*View
-	var index = 0
+	// Start listening for events.
+	go func() {
+		for {
+			select {
+			case _, ok := <-watcher.Events:
+				if !ok {
+					return
+				}
+				err = filepath.WalkDir("./fs", func(path string, d fs.DirEntry, err error) error {
+					if err != nil {
+						return err
+					}
+
+					if !d.IsDir() || path == "./fs" {
+						return nil
+					}
+
+					id := strings.Replace(path, "/fs", "", 1)
+					byteContent, err := os.ReadFile(path + "/content")
+
+					var content string
+
+					if err == nil {
+						content = string(byteContent)
+					}
+
+					var tag string
+
+					byteTag, err := os.ReadFile(path + "/tag")
+
+					if err == nil {
+						tag = strings.Trim(string(byteTag), " ")
+					} else {
+						tag = makeDefaultWindowTag(pwd)
+					}
+
+					windows = append(windows, NewView(id, pwd, tag, content))
+
+					var managers []gocui.Manager
+
+					for _, v := range windows {
+						managers = append(managers, v)
+					}
+
+					managers = append(managers, fl)
+
+					g.SetManager(managers...)
+
+					return nil
+				})
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				}
+				log.Println("error:", err)
+			}
+		}
+	}()
 
 	err = filepath.WalkDir("./fs", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		if !d.IsDir() {
+		if !d.IsDir() || path == "./fs" {
 			return nil
 		}
 
-		id := fmt.Sprintf("l%d", index+1)
+		// Add a path.
+		err = watcher.Add(path)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		id := strings.Replace(path, "/fs", "", 1)
 		byteContent, err := os.ReadFile(path + "/content")
 
 		var content string
@@ -169,55 +234,33 @@ func main() {
 			content = string(byteContent)
 		}
 
-		windows = append(windows, NewView(id, pwd, makeDefaultWindowTag(pwd), content))
+		var tag string
 
-		index += 1
+		byteTag, err := os.ReadFile(path + "/tag")
 
-    return nil
+		if err == nil {
+			tag = strings.Trim(string(byteTag), " ")
+		} else {
+			tag = makeDefaultWindowTag(pwd)
+		}
+
+		windows = append(windows, NewView(id, pwd, tag, content))
+
+		return nil
 	})
-
-	// Start listening for events.
-	// go func() {
-	// 	for {
-	// 		select {
-	// 		case event, ok := <-watcher.Events:
-	// 			if !ok {
-	// 				return
-	// 			}
-	// 			log.Println("event:", event)
-	// 			if event.Has(fsnotify.Write) {
-	// 				log.Println("modified file:", event.Name)
-	// 			}
-	// 		case err, ok := <-watcher.Errors:
-	// 			if !ok {
-	// 				return
-	// 			}
-	// 			log.Println("error:", err)
-	// 		}
-	// 	}
-	// }()
-
-	// Add a path.
-	err = watcher.Add("/tmp")
-	if err != nil {
-		log.Fatal(err)
-	}
 
 	if err != nil {
 		log.Panicln(err)
 	}
 	defer g.Close()
 
+	var managers []gocui.Manager
 
-	fl := gocui.ManagerFunc(flowLayout)
+	for _, v := range windows {
+		managers = append(managers, v)
+	}
 
-  var managers []gocui.Manager
-
-  for _, v := range windows {
-    managers = append(managers, v)
-  }
-
-  managers = append(managers, fl)
+	managers = append(managers, fl)
 
 	g.SetManager(managers...)
 
