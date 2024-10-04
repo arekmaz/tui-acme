@@ -2,12 +2,15 @@ package main
 
 import (
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/jroimartin/gocui"
 )
 
@@ -20,15 +23,14 @@ type View struct {
 	content string
 }
 
-
 func NewView(id string, pwd string, tag string, content string) *View {
-  return &View{id: id, pwd: pwd, tag: tag, content: content}
+	return &View{id: id, pwd: pwd, tag: tag, content: content}
 }
 
 func (wi *View) Layout(g *gocui.Gui) error {
 	lines := strings.Split(wi.content, "\n")
 	w := 0
-  title := wi.id + " " + wi.tag
+	title := wi.id + " " + wi.tag
 
 	for _, l := range lines {
 		if len(l) > w {
@@ -138,19 +140,86 @@ func main() {
 		panic(pwdErr.Error())
 	}
 
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer watcher.Close()
+
 	g, err := gocui.NewGui(gocui.OutputNormal)
+
+	var windows []*View
+	var index = 0
+
+	err = filepath.WalkDir("./fs", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if !d.IsDir() {
+			return nil
+		}
+
+		id := fmt.Sprintf("l%d", index+1)
+		byteContent, err := os.ReadFile(path + "/content")
+
+		var content string
+
+		if err == nil {
+			content = string(byteContent)
+		}
+
+		windows = append(windows, NewView(id, pwd, makeDefaultWindowTag(pwd), content))
+
+		index += 1
+
+    return nil
+	})
+
+	// Start listening for events.
+	// go func() {
+	// 	for {
+	// 		select {
+	// 		case event, ok := <-watcher.Events:
+	// 			if !ok {
+	// 				return
+	// 			}
+	// 			log.Println("event:", event)
+	// 			if event.Has(fsnotify.Write) {
+	// 				log.Println("modified file:", event.Name)
+	// 			}
+	// 		case err, ok := <-watcher.Errors:
+	// 			if !ok {
+	// 				return
+	// 			}
+	// 			log.Println("error:", err)
+	// 		}
+	// 	}
+	// }()
+
+	// Add a path.
+	err = watcher.Add("/tmp")
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	if err != nil {
 		log.Panicln(err)
 	}
 	defer g.Close()
 
-	l1 := NewView("l1", pwd, makeDefaultWindowTag(pwd), safeRun("ls"))
-	l2 := NewView("l2", pwd + "/drugie", makeDefaultWindowTag(pwd), safeRun("ls"))
-	l3 := NewView("l3", pwd + "/dupa", makeDefaultWindowTag(pwd), safeRun("ls"))
 
 	fl := gocui.ManagerFunc(flowLayout)
-	g.SetManager(l1, l2, l3, fl)
+
+  var managers []gocui.Manager
+
+  for _, v := range windows {
+    managers = append(managers, v)
+  }
+
+  managers = append(managers, fl)
+
+	g.SetManager(managers...)
 
 	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
 		log.Panicln(err)
