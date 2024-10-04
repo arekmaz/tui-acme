@@ -11,27 +11,24 @@ import (
 	"github.com/jroimartin/gocui"
 )
 
-type View struct {
-  id string
-  pwd string
-  tag string
-  content string
-}
-
-type Label struct {
-	name string
-	body string
-}
-
 var pwd string
 
-func NewLabel(name string, body string) *Label {
-	return &Label{name: name, body: body}
+type View struct {
+	id      string
+	pwd     string
+	tag     string
+	content string
 }
 
-func (wi *Label) Layout(g *gocui.Gui) error {
-	lines := strings.Split(wi.body, "\n")
+
+func NewView(id string, pwd string, tag string, content string) *View {
+  return &View{id: id, pwd: pwd, tag: tag, content: content}
+}
+
+func (wi *View) Layout(g *gocui.Gui) error {
+	lines := strings.Split(wi.content, "\n")
 	w := 0
+  title := wi.id + " " + wi.tag
 
 	for _, l := range lines {
 		if len(l) > w {
@@ -39,20 +36,22 @@ func (wi *Label) Layout(g *gocui.Gui) error {
 		}
 	}
 
-	h := len(lines) + 2
+	h := len(lines) + 4
 
-	w = w + 1
+	w = max(len(title), w) + 1
 
-	v, err := g.SetView(wi.name, 0, 0, w, h)
+	v, err := g.SetView(wi.id, 0, 0, w, h)
 
 	if err != nil {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
-		fmt.Fprint(v, wi.name)
+		fmt.Fprint(v, title)
 		fmt.Fprint(v, "\n")
-		fmt.Fprint(v, wi.body)
-    fmt.Fprint(v, "w: " + strconv.Itoa(w) + ", h: " + strconv.Itoa(h))
+		fmt.Fprint(v, "\n")
+		fmt.Fprint(v, wi.content)
+		fmt.Fprint(v, "\n")
+		fmt.Fprint(v, "w: "+strconv.Itoa(w)+", h: "+strconv.Itoa(h))
 	}
 
 	return nil
@@ -98,7 +97,7 @@ func flowLayout(g *gocui.Gui) error {
 	for _, view := range views {
 		w, h := view.Size()
 
-		_, err := g.SetView(view.Name(), x, 0, x + w + 1, h + 1)
+		_, err := g.SetView(view.Name(), x, 0, x+w+1, h+1)
 
 		if err != nil && err != gocui.ErrUnknownView {
 			return err
@@ -111,54 +110,47 @@ func flowLayout(g *gocui.Gui) error {
 }
 
 func safeRun(s string, args ...string) string {
-  cmd := exec.Command(s, args...)
+	cmd := exec.Command(s, args...)
 
-  o, err := cmd.Output()
+	o, err := cmd.Output()
 
-  if err != nil {
-    return s + "error"
-  }
+	if err != nil {
+		return s + "error"
+	}
 
-  return string(o)
+	return string(o)
 }
 
 func makeDefaultWindowTag(localPwd string) string {
-  suff :=  "New Del Look"
+	suff := "New Del Look"
 
-  if (pwd == localPwd) {
-    return suff
-  }
+	if pwd == localPwd {
+		return suff
+	}
 
-  return pwd + suff
+	return pwd + suff
 }
 
-
 func main() {
-  pwd, pwdErr := os.Getwd()
+	pwd, pwdErr := os.Getwd()
 
-  if pwdErr != nil {
-   panic(pwdErr.Error())
-  }
+	if pwdErr != nil {
+		panic(pwdErr.Error())
+	}
 
 	g, err := gocui.NewGui(gocui.OutputNormal)
+
 	if err != nil {
 		log.Panicln(err)
 	}
 	defer g.Close()
 
-  pwd, err := os.Getwd()
+	l1 := NewView("l1", pwd, makeDefaultWindowTag(pwd), safeRun("ls"))
+	l2 := NewView("l2", pwd + "/drugie", makeDefaultWindowTag(pwd), safeRun("ls"))
+	l3 := NewView("l3", pwd + "/dupa", makeDefaultWindowTag(pwd), safeRun("ls"))
 
-  if err != nil {
-		log.Panicln(err)
-  }
-
-  l1 := NewLabel(pwd, safeRun("ls"))
-	l2 := NewLabel("l2", safeRun("ls"))
-	l3 := NewLabel("l3", "a")
-	l4 := NewLabel("l4", "flow\nlayout")
-	l5 := NewLabel("l5", "!")
 	fl := gocui.ManagerFunc(flowLayout)
-	g.SetManager(l1, l2, l3, l4, l5, fl)
+	g.SetManager(l1, l2, l3, fl)
 
 	if err := g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
 		log.Panicln(err)
