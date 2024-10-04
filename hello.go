@@ -17,21 +17,20 @@ import (
 
 var pwd string
 
-type View struct {
+type Window struct {
 	id      string
 	pwd     string
 	tag     string
 	content string
 }
 
-func NewView(id string, pwd string, tag string, content string) *View {
-	return &View{id: id, pwd: pwd, tag: tag, content: content}
+func NewWindow(id string, pwd string, tag string, content string) *Window {
+	return &Window{id: id, pwd: pwd, tag: tag, content: content}
 }
 
-func (wi *View) Layout(g *gocui.Gui) error {
+func (wi *Window) DisplayData() (int, int, string) {
 	lines := strings.Split(wi.content, "\n")
 	w := 0
-	title := wi.id + " " + wi.tag
 
 	for _, l := range lines {
 		if len(l) > w {
@@ -39,9 +38,28 @@ func (wi *View) Layout(g *gocui.Gui) error {
 		}
 	}
 
-	h := len(lines) + 4
+	title := wi.id + " " + wi.tag
 
 	w = max(len(title), w) + 1
+
+	h := len(lines) + 4
+
+	return w, h, title
+}
+
+func (wi *Window) Draw(v *gocui.View) {
+	w, h, title := wi.DisplayData()
+	fmt.Fprint(v, title)
+	fmt.Fprint(v, "\n")
+	fmt.Fprint(v, "\n")
+	fmt.Fprint(v, wi.content)
+	fmt.Fprint(v, "\n")
+	fmt.Fprint(v, "w: "+strconv.Itoa(w)+", h: "+strconv.Itoa(h))
+}
+
+func (wi *Window) Layout(g *gocui.Gui) error {
+
+	w, h, _ := wi.DisplayData()
 
 	v, err := g.SetView(wi.id, 0, 0, w, h)
 
@@ -49,50 +67,14 @@ func (wi *View) Layout(g *gocui.Gui) error {
 		if err != gocui.ErrUnknownView {
 			return err
 		}
-		fmt.Fprint(v, title)
-		fmt.Fprint(v, "\n")
-		fmt.Fprint(v, "\n")
-		fmt.Fprint(v, wi.content)
-		fmt.Fprint(v, "\n")
-		fmt.Fprint(v, "w: "+strconv.Itoa(w)+", h: "+strconv.Itoa(h))
+
+		wi.Draw(v)
 	}
 
 	return nil
 }
 
 func flowLayout(g *gocui.Gui) error {
-	// maxX, maxY := g.Size()
-	//
-	//  paddingX := .5
-	//  paddingY := .5
-	//
-	//  width := maxX/2 - int(paddingX * 2)
-	//  height := maxY - int(paddingY * 2)
-	//
-	// if v, err := g.SetView("hello", maxX/2-width/2, maxY/2-height/2, maxX/2+width/2, maxY/2+height/2); err != nil {
-	// 	if err != gocui.ErrUnknownView {
-	// 		return err
-	// 	}
-	//
-	//    pwd, err := os.Getwd()
-	//
-	//    if (err != nil) {
-	//      return err
-	//    }
-	//
-	//    fmt.Fprintln(v, "Newcol Kill Putall Dump Exit Dupa")
-	// 	fmt.Fprintln(v, pwd)
-	//    ls := exec.Command("ls")
-	//
-	//    o, err := ls.Output()
-	//
-	//    if err != nil {
-	//      return err
-	//    }
-	//
-	// 	fmt.Fprintln(v,string(o))
-	// }
-
 	views := g.Views()
 
 	x := 0
@@ -134,6 +116,32 @@ func makeDefaultWindowTag(localPwd string) string {
 	return pwd + suff
 }
 
+func readWindowIds() ([]string, error) {
+	var ids []string
+	err := filepath.WalkDir("./fs", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if !d.IsDir() || path == "./fs" {
+			return nil
+		}
+
+		id := strings.Replace(path, "fs/", "", 1)
+
+		ids = append(ids, id)
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return ids, nil
+
+}
+
 func main() {
 	pwd, pwdErr := os.Getwd()
 
@@ -141,19 +149,26 @@ func main() {
 		panic(pwdErr.Error())
 	}
 
-	var windows []*View
+	var windows []*Window
 	fl := gocui.ManagerFunc(flowLayout)
 
-	watcher, err := fsnotify.NewWatcher()
+	topLvlWatcher, err := fsnotify.NewWatcher()
+
 	if err != nil {
-		log.Fatal(err)
+		panic(err.Error())
 	}
-	defer watcher.Close()
+
+	defer topLvlWatcher.Close()
 
 	g, err := gocui.NewGui(gocui.OutputNormal)
 
+	if err != nil {
+		panic(err.Error())
+	}
+
 	// Add a path.
-	err = watcher.Add("./fs")
+	err = topLvlWatcher.Add("./fs")
+
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -162,7 +177,7 @@ func main() {
 	go func() {
 		for {
 			select {
-			case event, ok := <-watcher.Events:
+			case event, ok := <-topLvlWatcher.Events:
 				if !ok {
 					return
 				}
@@ -291,7 +306,7 @@ func main() {
 					return nil
 				})
 
-			case err, ok := <-watcher.Errors:
+			case err, ok := <-topLvlWatcher.Errors:
 				if !ok {
 					return
 				}
@@ -310,7 +325,7 @@ func main() {
 		}
 
 		// Add a path.
-		err = watcher.Add(path)
+		err = topLvlWatcher.Add(path)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -334,7 +349,7 @@ func main() {
 			tag = makeDefaultWindowTag(pwd)
 		}
 
-		windows = append(windows, NewView(id, pwd, tag, content))
+		windows = append(windows, NewWindow(id, pwd, tag, content))
 
 		return nil
 	})
